@@ -12,7 +12,9 @@
     "etl:boundaries": "node scripts/build-boundaries.js",
     "dedupe": "node scripts/dedupe-seed-artifacts.js",
     "etl:revised": "node scripts/import-revised-dataset.js",
-    "seed:fixtures": "node scripts/seed-model-fixtures.js"
+    "seed:fixtures": "node scripts/seed-model-fixtures.js",
+    "synthetic:demo": "node scripts/generate-synthetic-demo.js",
+    "etl:synthetic": "node scripts/import-synthetic-demo.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

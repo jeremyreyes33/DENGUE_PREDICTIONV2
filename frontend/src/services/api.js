@@ -2,8 +2,10 @@ import axios from 'axios'
 
 // In dev, Vite proxies /api to the Node.js server (see vite.config.js).
 // In production, set VITE_API_BASE_URL to the deployed API origin.
+export const apiBase = import.meta.env.VITE_API_BASE_URL || '/api'
+
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: apiBase,
 })
 
 client.interceptors.request.use((config) => {
@@ -33,8 +35,10 @@ export const surveillanceApi = {
 }
 
 export const predictionsApi = {
-  forRegion: (regionId, modelRunId) =>
-    client.get(`/predictions/${regionId}`, { params: { modelRunId } }).then((r) => r.data),
+  // level: 50 | 80 | 95 — which stored interval to serve as ci_lower/ci_upper
+  // (default 95). Bad levels are a 400, so only pass validated values.
+  forRegion: (regionId, modelRunId, level) =>
+    client.get(`/predictions/${regionId}`, { params: { modelRunId, level } }).then((r) => r.data),
 }
 
 /*
@@ -81,6 +85,14 @@ export const alertsApi = {
 
 export const authApi = {
   login: (email, password) => client.post('/auth/login', { email, password }).then((r) => r.data),
+}
+
+export const fixtureApi = {
+  // Synthetic DEMO FIXTURE inspector. region = slug, split = train | test |
+  // diagnostic_excluded; both optional. The server filters the whole file
+  // before capping the sample, so ?region=R13 returns R13's rows.
+  get: ({ region, split } = {}) =>
+    client.get('/fixture', { params: { region, split } }).then((r) => r.data),
 }
 
 export default client

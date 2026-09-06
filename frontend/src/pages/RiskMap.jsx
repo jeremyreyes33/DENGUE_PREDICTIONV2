@@ -5,9 +5,11 @@ import { Card, CardBody, CardFoot, CardHead } from '../components/Card.jsx'
 import { PageHeader, Select, ViewToggle } from '../components/Controls.jsx'
 import { AsyncSection, EmptyState, SkeletonBlock } from '../components/States.jsx'
 import Choropleth, { ChoroplethLegend, makeBins } from '../components/Choropleth.jsx'
+import AnomalyBar, { formatAnomaly } from '../components/AnomalyBar.jsx'
 import DataTable from '../components/DataTable.jsx'
 import StatCard from '../components/StatCard.jsx'
 import { formatInt, formatNumber, toNumber } from '../lib/format.js'
+import { buildRainfallNormals, rainAnomaly } from '../lib/panelFields.js'
 
 const METRICS = {
   cases: {
@@ -177,6 +179,35 @@ export default function RiskMap() {
     [periodRows],
   )
 
+  /*
+   * Rainfall anomaly for the selected period, region scope only. The baseline
+   * is the place-month mean across the whole panel window (see panelFields):
+   * a July in R4A is compared against R4A Julys, not against the national
+   * average and not against January. Municipal scope has no climate columns,
+   * so rainByKey simply holds nulls there and the tooltip stays quiet.
+   */
+  const rainNormals = useMemo(() => buildRainfallNormals(panel ?? []), [panel])
+
+  const rainByKey = useMemo(() => {
+    if (!isRegion) return new Map();
+    const wanted = (panel ?? []).filter((r) => r.year === activeYear
+      && (activeMonth === 'all' || r.month === Number(activeMonth)));
+    const groups = new Map();
+    for (const r of wanted) {
+      if (!groups.has(r.region_slug)) groups.set(r.region_slug, []);
+      groups.get(r.region_slug).push(r);
+    }
+    return new Map([...groups].map(([key, rows]) => [key, rainAnomaly(rows, rainNormals)]));
+  }, [isRegion, panel, rainNormals, activeYear, activeMonth])
+
+  const maxAnomalyAbs = useMemo(() => {
+    let peak = 0;
+    for (const { anomaly } of rainByKey.values()) {
+      if (anomaly !== null) peak = Math.max(peak, Math.abs(anomaly));
+    }
+    return peak;
+  }, [rainByKey])
+
   const lookup = (feature) => byKey.get(
     isRegion
       ? feature.properties.slug
@@ -331,6 +362,9 @@ export default function RiskMap() {
                   ariaLabel={`Choropleth of ${metric.label} by municipality in CALABARZON, ${activeYear}. Values are listed in the table view.`}
                   renderTooltip={(feature) => {
                     const row = lookup(feature)
+                    // rainByKey is an empty map outside the regional scope, so
+                    // municipal tooltips fall through to null with no branch.
+                    const rain = rainByKey.get(feature.properties.slug) ?? null
                     return (
                       <>
                         <p className="map-tip-name">{feature.properties.name}</p>
@@ -349,6 +383,15 @@ export default function RiskMap() {
                           <span>Deaths</span>
                           <span className="map-tip-value">{row ? formatInt(row.deaths) : '—'}</span>
                         </div>
+                        {isRegion && rain?.anomaly !== null && rain?.anomaly !== undefined && (
+                          <>
+                            <div className="map-tip-row">
+                              <span>{`Rain vs usual${activeMonth === 'all' ? ' (year)' : ''}`}</span>
+                              <span className="map-tip-value">{formatAnomaly(rain.anomaly)}</span>
+                            </div>
+                            <AnomalyBar value={rain.anomaly} maxAbs={maxAnomalyAbs} />
+                          </>
+                        )}
                       </>
                     )
                   }}
@@ -373,6 +416,18 @@ export default function RiskMap() {
                   className: 'cell-strong',
                   render: (r) => METRICS.incidence.format(METRICS.incidence.of(r)),
                 },
+                // The tooltip's anomaly bar, as numbers: same values, same
+                // missing-data rule. Municipal scope has no climate columns,
+                // so the column is omitted there rather than filled with dashes.
+                ...(isRegion ? [{
+                  key: 'rain_anomaly',
+                  header: 'Rain ±',
+                  align: 'right',
+                  render: (r) => {
+                    const a = rainByKey.get(r.key)?.anomaly ?? null;
+                    return a === null ? <span className="cell-quiet">—</span> : formatAnomaly(a);
+                  },
+                }] : []),
               ]}
             />
           )}
@@ -382,7 +437,9 @@ export default function RiskMap() {
           {isRegion ? (
             <>
               Cases: DOH monthly regional surveillance, 2016–2020 (1,020 region-months).
-              Population: PSA 2015/2020 census, interpolated between them. Boundaries:{' '}
+              Population: PSA 2015/2020 census, interpolated between them. Rainfall anomaly
+              compares the selected period against that place-month's 2016–2020 mean — positive
+              is wetter than usual, the variable to watch rather than raw millimetres. Boundaries:{' '}
               <a href="https://www.geoboundaries.org/" target="_blank" rel="noreferrer">geoBoundaries</a>{' '}
               gbOpen PHL ADM1 (2020), CC-BY 4.0. This is the panel the model is trained and
               scored on. 2020 is shown but excluded from headline evaluation — the COVID

@@ -5,6 +5,14 @@
  *   npm run seed:fixtures
  *   npm run seed:fixtures -- --clear
  *
+ * --clear DELETES exactly the runs stamped with NOTE below (em-dash text
+ * matched byte-for-byte) and relies on ON DELETE CASCADE for their
+ * predictions, intervals, metrics, coverage, PIT bins and effects; alerts
+ * referencing them keep their rows with triggered_by set NULL. Anything with
+ * different notes -- harness validation runs, real model output -- is never
+ * touched. Never broaden the match (no LIKE, no substring): a loose match is
+ * how a cleanup script eats real results.
+ *
  * ---------------------------------------------------------------------------
  * THESE NUMBERS ARE NOT MODEL OUTPUT. They exist so the Calibration and
  * Drivers pages can be built and reviewed before the Python service exists.
@@ -76,27 +84,67 @@ async function main() {
   try {
     await conn.beginTransaction()
 
+    // --clear deletes ONLY exact-notes fixtures (cascade handles dependents;
+    // alerts keep their rows with triggered_by set NULL). Harness and real
+    // runs carry different notes and are never matched: no LIKE, no substring.
+    if (CLEAR) {
+      const [fixtures] = await conn.query(
+        'SELECT id, model_type FROM model_runs WHERE notes = ? ORDER BY id',
+        [NOTE],
+      )
+      if (!fixtures.length) {
+        await conn.commit()
+        log('\n  No fixture runs found (exact notes match). Nothing removed; '
+          + 'harness and real runs are never matched by --clear.')
+        return
+      }
+      const ids = fixtures.map((r) => r.id)
+      log(`\n  fixture runs to delete: ${ids.map((id, i) => `${id} (${fixtures[i].model_type})`).join(', ')}`)
+      const [r] = await conn.query('DELETE FROM model_runs WHERE id IN (?)', [ids])
+      await conn.commit()
+      log(`\n  Deleted ${r.affectedRows} fixture run(s); dependents cascaded, `
+        + 'referencing alerts kept with triggered_by set NULL.')
+      return
+    }
+
+    /*
+     * Seeding guard: stamp ONLY fixture-eligible runs --
+     *   (a) already stamped (notes = NOTE, so re-runs are idempotent), or
+     *   (b) fresh from `npm run seed` (notes NULL, one of the three seed
+     *       model_types, version v1).
+     * Harness runs carry their own notes; real model output carries its own
+     * version and feature set. Residual risk, stated plainly: a production
+     * run literally named Bayesian-Neural Hybrid / v1 / NULL-notes matches
+     * (b) -- delete fixtures (now safe via --clear) before real fits land,
+     * and read the stamped-ids log line below on every run.
+     */
     const [runs] = await conn.query(
-      'SELECT id, model_type FROM model_runs ORDER BY id',
+      'SELECT id, model_type, version, notes FROM model_runs ORDER BY id',
     )
     if (!runs.length) {
       log('\n  No model_runs found. Run `npm run seed` first.')
       return
     }
 
-    const ids = runs.map((r) => r.id)
+    const eligible = runs.filter((r) => r.notes === NOTE
+      || (r.notes === null
+        && ['SARIMA', 'LSTM', 'Bayesian-Neural Hybrid'].includes(r.model_type)
+        && r.version === 'v1'))
+    const skipped = runs.filter((r) => !eligible.includes(r))
+    if (skipped.length) {
+      log(`\n  protected ${skipped.length} non-fixture run(s), left untouched: `
+        + skipped.map((r) => `${r.id} (${r.model_type})`).join(', '))
+    }
+    if (!eligible.length) {
+      await conn.commit()
+      log('\n  No fixture-eligible runs. Nothing stamped.')
+      return
+    }
+
+    const ids = eligible.map((r) => r.id)
     for (const table of ['interval_coverage', 'calibration_bins', 'feature_importance']) {
       const [r] = await conn.query(`DELETE FROM ${table} WHERE model_run_id IN (?)`, [ids])
       if (r.affectedRows) log(`  cleared ${r.affectedRows} rows from ${table}`)
-    }
-
-    if (CLEAR) {
-      await conn.query(
-        'UPDATE model_runs SET notes = NULL WHERE notes = ? AND id IN (?)', [NOTE, ids],
-      )
-      await conn.commit()
-      log('\n  Cleared. model_runs.notes reset.')
-      return
     }
 
     // The study's evaluation split, recorded on every run so the comparison is
@@ -131,7 +179,7 @@ async function main() {
     let pit = 0
     let fi = 0
 
-    for (const run of runs) {
+    for (const run of eligible) {
       const c = COVERAGE[run.model_type]
       const p = PIT[run.model_type]
       if (!c || !p) continue

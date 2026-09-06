@@ -114,9 +114,24 @@ function MetricChart({ metric, runs, colorFor }) {
 export default function ModelComparison() {
   const t = useChartTheme()
   const [view, setView] = useState('chart')
+  const [horizon, setHorizon] = useState('1')
   const { data: runs, loading, error, refetch } = useFetch(() => modelsApi.compare(), [])
 
   const list = runs ?? []
+
+  /*
+   * Horizons are different regimes, not newer versions: a 6-month recursive
+   * RMSE is scored over compounding paths while a 1-step RMSE is scored over
+   * single months, so ranking them together is a category error. The filter
+   * defaults to one-step (the study's headline regime); colours stay assigned
+   * from the FULL list so filtering can never repaint a model.
+   */
+  const scoped = useMemo(() => {
+    if (horizon === 'all') return list
+    return list.filter((r) => (horizon === 'multi'
+      ? Number(r.horizon_months ?? 1) > 1
+      : Number(r.horizon_months ?? 1) === 1))
+  }, [list, horizon])
 
   /*
    * Colour follows the entity, never its rank. The hybrid is pinned to slot 1
@@ -136,23 +151,34 @@ export default function ModelComparison() {
     return (id) => slots[modelOrder.indexOf(id) % slots.length]
   }, [modelOrder, t])
 
-  const best = list[0]
-  const runnerUp = list[1]
+  const best = scoped[0]
+  const runnerUp = scoped[1]
   const rmseGain = best && runnerUp
     ? ((toNumber(runnerUp.rmse) - toNumber(best.rmse)) / toNumber(runnerUp.rmse)) * 100
     : null
 
   const bestPerMetric = useMemo(
-    () => Object.fromEntries(METRICS.map((m) => [m.key, bestIdFor(m, list)])),
-    [list],
+    () => Object.fromEntries(METRICS.map((m) => [m.key, bestIdFor(m, scoped)])),
+    [scoped],
   )
+
+  const horizonLabel = horizon === 'all' ? 'all horizons' : horizon === 'multi' ? 'multi-step horizons' : 'one-step horizon'
 
   return (
     <>
       <PageHeader
         title="Model comparison"
-        description="Comparative evaluation of the Bayesian-neural hybrid against the SARIMA and LSTM baselines, on the held-out evaluation window."
-        actions={<ViewToggle view={view} onChange={setView} label="Comparison view" />}
+        description={`Comparative evaluation of the Bayesian-neural hybrid against the SARIMA and LSTM baselines, on the held-out evaluation window — ${horizonLabel}.`}
+        actions={(
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)', alignItems: 'center' }}>
+            <div className="segmented" role="group" aria-label="Forecast horizon">
+              <button type="button" aria-pressed={horizon === '1'} onClick={() => setHorizon('1')}>One-step</button>
+              <button type="button" aria-pressed={horizon === 'multi'} onClick={() => setHorizon('multi')}>Multi-step</button>
+              <button type="button" aria-pressed={horizon === 'all'} onClick={() => setHorizon('all')}>All</button>
+            </div>
+            <ViewToggle view={view} onChange={setView} label="Comparison view" />
+          </div>
+        )}
       />
 
       <EvaluationBanner run={best} />
@@ -161,7 +187,7 @@ export default function ModelComparison() {
         loading={loading}
         error={error}
         hasData={list.length > 0}
-        isEmpty={Boolean(runs) && list.length === 0}
+        isEmpty={Boolean(runs) && scoped.length === 0}
         onRetry={refetch}
         errorTitle="Could not load evaluation results"
         skeleton={<Card><SkeletonRows rows={5} /></Card>}
@@ -169,8 +195,10 @@ export default function ModelComparison() {
           <Card>
             <EmptyState
               icon="models"
-              title="No evaluation runs recorded"
-              body="Each model run needs a matching row in evaluation_metrics. Run npm run seed in the backend for the sample comparison, or let the Python model service write real results."
+              title={list.length === 0 ? 'No evaluation runs recorded' : 'No runs at this horizon'}
+              body={list.length === 0
+                ? 'Each model run needs a matching row in evaluation_metrics. Run npm run seed in the backend for the sample comparison, or let the Python model service write real results.'
+                : 'No evaluated runs exist at the selected horizon yet. Train one (for example: python validate_harness.py --horizon 6 --origin 2019-06), or switch the horizon filter.'}
             />
           </Card>
         )}
@@ -185,6 +213,7 @@ export default function ModelComparison() {
                 </span>
                 <span style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>{best.model_type}</span>
                 <span className="tag">{best.version}</span>
+                <span className="tag">{Number(best.horizon_months ?? 1) > 1 ? `H=${best.horizon_months}` : 'H=1'}</span>
                 <span className="muted" style={{ fontSize: 'var(--text-xs)', marginLeft: 'auto' }}>
                   Trained {formatDateTime(best.trained_at)}
                 </span>
@@ -201,10 +230,9 @@ export default function ModelComparison() {
         {view === 'chart' ? (
           <>
             <div className="legend section-gap" style={{ paddingBottom: 0 }}>
-              {modelOrder.map((id) => {
-                const run = list.find((r) => r.id === id)
-                return <LegendItem key={id} shape="swatch" color={colorFor(id)} label={run.model_type} />
-              })}
+              {scoped.map((run) => (
+                <LegendItem key={run.id} shape="swatch" color={colorFor(run.id)} label={run.model_type} />
+              ))}
             </div>
 
             <div className="section-gap">
@@ -216,7 +244,7 @@ export default function ModelComparison() {
             </div>
             <div className="grid grid-3 section-gap">
               {POINT_METRICS.map((metric) => (
-                <MetricChart key={metric.key} metric={metric} runs={list} colorFor={colorFor} />
+                <MetricChart key={metric.key} metric={metric} runs={scoped} colorFor={colorFor} />
               ))}
             </div>
 
@@ -232,7 +260,7 @@ export default function ModelComparison() {
             </div>
             <div className="grid grid-3 section-gap">
               {PROB_METRICS.map((metric) => (
-                <MetricChart key={metric.key} metric={metric} runs={list} colorFor={colorFor} />
+                <MetricChart key={metric.key} metric={metric} runs={scoped} colorFor={colorFor} />
               ))}
             </div>
           </>
@@ -244,7 +272,7 @@ export default function ModelComparison() {
             />
             <DataTable
               caption="Model evaluation metrics"
-              rows={list}
+              rows={scoped}
               getRowKey={(row) => row.id}
               columns={[
                 {

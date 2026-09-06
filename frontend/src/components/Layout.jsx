@@ -12,6 +12,7 @@ const NAV = [
     heading: 'Monitor',
     items: [
       { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
+      { to: '/response', label: 'Outbreak response', icon: 'shield' },
       { to: '/map', label: 'Risk map', icon: 'map' },
       { to: '/alerts', label: 'Alerts', icon: 'alerts', badge: 'alerts' },
     ],
@@ -32,12 +33,16 @@ const NAV = [
   },
   {
     heading: 'Sources',
-    items: [{ to: '/data', label: 'Data management', icon: 'data' }],
+    items: [
+      { to: '/data', label: 'Data management', icon: 'data' },
+      { to: '/fixture', label: 'Synthetic fixture', icon: 'file' },
+    ],
   },
 ]
 
 const TITLES = {
   '/': 'Dashboard',
+  '/response': 'Outbreak response',
   '/map': 'Risk map',
   '/alerts': 'Alerts',
   '/forecast': 'Forecast',
@@ -47,6 +52,7 @@ const TITLES = {
   '/mathematics': 'Mathematical calculation',
   '/methodology': 'Model mathematics',
   '/data': 'Data management',
+  '/fixture': 'Synthetic fixture',
 }
 
 const THEME_LABEL = {

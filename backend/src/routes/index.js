@@ -8,6 +8,7 @@ import {
 } from '../controllers/modelsController.js'
 import { getPanel } from '../controllers/panelController.js'
 import { listAlerts, listRegionRisk } from '../controllers/alertsController.js'
+import { getFixture, downloadFixture } from '../controllers/fixtureController.js'
 import { login } from '../controllers/authController.js'
 
 export const router = new Router()
@@ -31,5 +32,11 @@ router.get('/api/models/:runId/importance', getFeatureImportance)
 
 router.get('/api/alerts', listAlerts)
 router.get('/api/alerts/regions', listRegionRisk)
+
+// Fixture inspector (synthetic DEMO data only): registered after the
+// observed-data routes so the grouping stays obvious. Literal first, per the
+// house rule from /api/models/compare above.
+router.get('/api/fixture/download', downloadFixture)
+router.get('/api/fixture', getFixture)
 
 router.post('/api/auth/login', login)

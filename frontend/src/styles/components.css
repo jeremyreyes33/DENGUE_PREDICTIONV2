@@ -257,6 +257,24 @@
 
 .filter-bar-spacer { margin-left: auto; }
 
+/* Checkbox inside a filter bar: same text size as labels, box aligned to the
+   text baseline, never stretched by the bar's centering. */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.check input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 /* =========================================================================
    Grid
    ========================================================================= */
@@ -1815,6 +1833,7 @@ select.input { padding-right: 30px; }
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-1);
   margin-bottom: var(--sp-5);
   border-bottom: 1px solid var(--line);
